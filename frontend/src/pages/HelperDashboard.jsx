@@ -347,10 +347,10 @@ function SmartRecommendationCard({ recommendation, rank, onAccept }) {
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <span className="bg-purple-100 text-purple-800 text-xs font-bold px-2 py-1 rounded-full">
-              #{rank} Match
+              #{rank} {t('matchRank')}
             </span>
             <span className="text-sm font-semibold text-gray-700">
-              {Math.round(rec.match_score)}% match
+              {Math.round(rec.match_score)}% {t('matchPercent')}
             </span>
           </div>
           <AIPriorityBadge 
@@ -367,7 +367,7 @@ function SmartRecommendationCard({ recommendation, rank, onAccept }) {
               {rec.help_type} {t('needed') || 'Needed'}
             </h3>
             <p className="text-xs text-gray-500">
-              📍 {rec.distance_km} km away
+              📍 {rec.distance_km} {t('kmAway')}
             </p>
           </div>
         </div>

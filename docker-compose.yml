@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    container_name: relieflink-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./relieflink.db
+      - SECRET_KEY=relieflink-super-secret-key-change-in-production
+      - DEBUG=false
+      - CORS_ORIGINS=http://localhost,http://localhost:80
+    volumes:
+      - backend-data:/app/relieflink.db
+      - uploads:/app/uploads
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: relieflink-ui
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend-data:
+  uploads:

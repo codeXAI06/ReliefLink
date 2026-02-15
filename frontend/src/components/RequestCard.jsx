@@ -55,6 +55,26 @@ function RequestCard({ request, showActions = false, onAccept, onComplete, onSho
           </div>
         )}
         
+        {/* Escalation indicator */}
+        {request.escalation_level > 0 && (
+          <div className="mb-2 flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 px-2 py-1 rounded-lg">
+            <span className="animate-pulse">⚡</span>
+            {t('escalatedLevel')} (Level {request.escalation_level})
+          </div>
+        )}
+
+        {/* Distress indicator */}
+        {request.distress_score > 0.3 && (
+          <div className={`mb-2 flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg ${
+            request.distress_score > 0.7 ? 'text-red-700 bg-red-50' :
+            request.distress_score > 0.4 ? 'text-orange-700 bg-orange-50' :
+            'text-yellow-700 bg-yellow-50'
+          }`}>
+            <span>{request.distress_score > 0.7 ? '🔴' : request.distress_score > 0.4 ? '🟠' : '🟡'}</span>
+            {t('distressLevel')}: {request.distress_score > 0.7 ? t('critical') : request.distress_score > 0.4 ? t('high') || 'High' : t('moderate')}
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-start justify-between mb-2">
           <div className="flex items-center space-x-2">
@@ -83,7 +103,7 @@ function RequestCard({ request, showActions = false, onAccept, onComplete, onSho
               {t(request.urgency)}
             </span>
             <span className={`px-2 py-1 rounded-full text-xs font-medium capitalize ${statusBadge[request.status]}`}>
-              {request.status.replace('_', ' ')}
+              {t(request.status) || request.status.replace('_', ' ')}
             </span>
           </div>
         </div>
@@ -113,6 +133,22 @@ function RequestCard({ request, showActions = false, onAccept, onComplete, onSho
               simplifiedText={request.simplified_text}
               originalText={request.description}
             />
+          </div>
+        )}
+
+        {/* Photo Evidence */}
+        {request.image_urls && request.image_urls.length > 0 && (
+          <div className="flex gap-2 mb-3 overflow-x-auto">
+            {request.image_urls.map((url, i) => (
+              <img
+                key={i}
+                src={url}
+                alt={`Damage evidence ${i + 1}`}
+                className="w-16 h-16 rounded-lg object-cover border border-gray-200 flex-shrink-0"
+                loading="lazy"
+              />
+            ))}
+            <span className="text-xs text-gray-400 self-center ml-1">📷 {request.image_urls.length} {t('photos')}</span>
           </div>
         )}
 

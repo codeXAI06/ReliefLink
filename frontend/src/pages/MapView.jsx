@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, Circle, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
-import { getRequests, getHelpTypeIcon } from '../api';
+import { getRequests, getHelpTypeIcon, getHazardZones } from '../api';
 import { useLanguage } from '../i18n/LanguageContext';
 import { useAuth } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
@@ -71,6 +71,8 @@ function MapView() {
   const [selectedType, setSelectedType] = useState('');
   const [routeTo, setRouteTo] = useState(null);
   const [routeCoords, setRouteCoords] = useState([]);
+  const [hazardZones, setHazardZones] = useState([]);
+  const [showHazardZones, setShowHazardZones] = useState(true);
   const { t } = useLanguage();
   const { isAuthenticated } = useAuth();
   
@@ -79,6 +81,7 @@ function MapView() {
 
   useEffect(() => {
     loadRequests();
+    loadHazardZones();
     getUserLocation();
   }, [selectedType]);
 
@@ -93,6 +96,15 @@ function MapView() {
       console.error('Error loading requests:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadHazardZones = async () => {
+    try {
+      const data = await getHazardZones(5);
+      setHazardZones(data.hazard_zones || []);
+    } catch (err) {
+      console.error('Error loading hazard zones:', err);
     }
   };
 
@@ -179,6 +191,20 @@ function MapView() {
           >
             🏠 {t('shelter')}
           </FilterButton>
+
+          <div className="border-l border-gray-300 h-6 mx-1"></div>
+
+          <button
+            onClick={() => setShowHazardZones(!showHazardZones)}
+            className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors flex items-center space-x-1 ${
+              showHazardZones
+                ? 'bg-red-500 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <span>⚠️</span>
+            <span>{t('hazardZones') || 'Hazard Zones'}</span>
+          </button>
         </div>
       </div>
 
@@ -206,6 +232,107 @@ function MapView() {
           
           <MapUpdater userLocation={userLocation} requests={requests} />
           
+          {/* Hazard zone circles */}
+          {showHazardZones && hazardZones.map((zone, idx) => {
+            const severityStyles = {
+              extreme: { color: '#991B1B', fillColor: '#EF4444', fillOpacity: 0.25, weight: 3, dashArray: '6, 4' },
+              high:    { color: '#B45309', fillColor: '#F97316', fillOpacity: 0.20, weight: 2, dashArray: '6, 4' },
+              moderate:{ color: '#A16207', fillColor: '#FACC15', fillOpacity: 0.15, weight: 2, dashArray: '8, 6' },
+              low:     { color: '#166534', fillColor: '#4ADE80', fillOpacity: 0.12, weight: 1, dashArray: '10, 8' },
+            };
+            const style = severityStyles[zone.severity] || severityStyles.moderate;
+            const radiusMeters = zone.radius_km * 1000;
+
+            const helpTypeSummary = Object.entries(zone.help_types || {})
+              .map(([type, count]) => `${getHelpTypeIcon(type)} ${type}: ${count}`)
+              .join(', ');
+
+            return (
+              <Circle
+                key={`hazard-${idx}`}
+                center={[zone.center_lat, zone.center_lon]}
+                radius={radiusMeters}
+                pathOptions={style}
+              >
+                <Tooltip direction="top" sticky>
+                  <div className="text-sm font-semibold">
+                    ⚠️ {zone.severity.toUpperCase()} {t('disasterZone')}
+                  </div>
+                  <div className="text-xs mt-1">
+                    {zone.request_count} active request{zone.request_count !== 1 ? 's' : ''}
+                    {zone.critical_count > 0 && (
+                      <span className="text-red-600 font-bold ml-1">
+                        ({zone.critical_count} critical)
+                      </span>
+                    )}
+                  </div>
+                  {helpTypeSummary && (
+                    <div className="text-xs mt-1 text-gray-600">{helpTypeSummary}</div>
+                  )}
+                </Tooltip>
+                <Popup>
+                  <div className="min-w-[200px]">
+                    <div className="flex items-center space-x-2 mb-2">
+                      <span className="text-xl">⚠️</span>
+                      <strong>{zone.severity.toUpperCase()} {t('disasterZone')}</strong>
+                    </div>
+                    <div className="text-sm space-y-1">
+                      <p>📊 <strong>{zone.request_count}</strong> active request{zone.request_count !== 1 ? 's' : ''}</p>
+                      {zone.critical_count > 0 && (
+                        <p className="text-red-600">🚨 <strong>{zone.critical_count}</strong> critical</p>
+                      )}
+                      <p>📏 {t('radiusKm')}: ~{zone.radius_km} km</p>
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-gray-200">
+                      <p className="text-xs font-semibold mb-1">{t('needsBreakdown')}:</p>
+                      {Object.entries(zone.help_types || {}).map(([type, count]) => (
+                        <span key={type} className="inline-block bg-gray-100 rounded px-2 py-0.5 text-xs mr-1 mb-1">
+                          {getHelpTypeIcon(type)} {type}: {count}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </Popup>
+              </Circle>
+            );
+          })}
+
+          {/* Hyderabad Hazard Zone — static geo-fence */}
+          {showHazardZones && (
+            <Circle
+              center={[17.385, 78.4867]}
+              radius={25000}
+              pathOptions={{
+                color: '#DC2626',
+                fillColor: '#FCA5A5',
+                fillOpacity: 0.15,
+                weight: 3,
+                dashArray: '10, 6',
+              }}
+            >
+              <Tooltip direction="top" sticky>
+                <div className="text-sm font-semibold">
+                  🏙️ {t('hyderabadHazardZone')}
+                </div>
+                <div className="text-xs mt-1">
+                  {t('radiusKm')}: ~25 km
+                </div>
+              </Tooltip>
+              <Popup>
+                <div className="min-w-[200px]">
+                  <div className="flex items-center space-x-2 mb-2">
+                    <span className="text-xl">🏙️</span>
+                    <strong>{t('hyderabadHazardZone')}</strong>
+                  </div>
+                  <div className="text-sm space-y-1">
+                    <p>📏 {t('radiusKm')}: ~25 km</p>
+                    <p className="text-red-600 text-xs">⚠️ {t('outsideZone')}: {t('flagged')}</p>
+                  </div>
+                </div>
+              </Popup>
+            </Circle>
+          )}
+
           {/* Route line */}
           {routeCoords.length > 0 && (
             <Polyline 
@@ -340,6 +467,19 @@ function MapView() {
             <LegendItem color="bg-orange-500" label={t('moderate')} />
             <LegendItem color="bg-green-500" label={t('low')} />
           </div>
+          {showHazardZones && (
+            <>
+              <div className="text-xs font-semibold text-gray-600 mt-3 mb-2">
+                ⚠️ {t('hazardZones') || 'Hazard Zones'}
+              </div>
+              <div className="space-y-1">
+                <LegendItem color="bg-red-400" label={t('extreme')} ring />
+                <LegendItem color="bg-orange-400" label={t('high')} ring />
+                <LegendItem color="bg-yellow-400" label={t('moderate')} ring />
+                <LegendItem color="bg-green-400" label={t('low')} ring />
+              </div>
+            </>
+          )}
         </div>
 
         {/* Request count */}
@@ -347,6 +487,11 @@ function MapView() {
           <span className="text-sm font-medium text-gray-700">
             {requests.length} {t('requests')}
           </span>
+          {showHazardZones && hazardZones.length > 0 && (
+            <span className="text-sm font-medium text-red-600 ml-2">
+              | ⚠️ {hazardZones.length} {t('zones')}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -368,10 +513,14 @@ function FilterButton({ active, onClick, children }) {
   );
 }
 
-function LegendItem({ color, label }) {
+function LegendItem({ color, label, ring }) {
   return (
     <div className="flex items-center space-x-2">
-      <span className={`w-3 h-3 rounded-full ${color}`}></span>
+      {ring ? (
+        <span className={`w-3 h-3 rounded-full ${color} opacity-50 border-2 border-current`}></span>
+      ) : (
+        <span className={`w-3 h-3 rounded-full ${color}`}></span>
+      )}
       <span className="text-xs text-gray-600">{label}</span>
     </div>
   );

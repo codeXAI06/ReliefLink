@@ -1,18 +1,24 @@
 """
 Helpers API Router
-Handles volunteer/NGO registration and dashboard
+Handles volunteer/NGO registration and dashboard with JWT auth
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..database import get_db
 from ..models import Helper, HelpRequest
 from ..schemas import HelperCreate, HelperResponse, HelperDashboard, HelpRequestResponse
 from ..utils import mask_phone, format_time_ago, haversine_distance
+from ..auth import (
+    get_password_hash, verify_password, create_access_token,
+    TokenResponse, get_current_user, require_auth, TokenData
+)
+from ..logging_config import get_logger
 
+logger = get_logger("helpers")
 router = APIRouter(prefix="/helpers", tags=["Helpers"])
 
 
@@ -61,7 +67,7 @@ async def register_helper(
 ):
     """
     Register a new helper/volunteer
-    Simple registration - minimal required info
+    Returns helper profile + JWT token
     """
     # Check if phone already registered
     existing = db.query(Helper).filter(Helper.phone == helper_data.phone).first()
@@ -71,6 +77,7 @@ async def register_helper(
     db_helper = Helper(
         name=helper_data.name,
         phone=helper_data.phone,
+        password_hash=get_password_hash(helper_data.password) if helper_data.password else None,
         organization=helper_data.organization,
         latitude=helper_data.latitude,
         longitude=helper_data.longitude,
@@ -80,6 +87,7 @@ async def register_helper(
     db.add(db_helper)
     db.commit()
     db.refresh(db_helper)
+    logger.info(f"New helper registered: {db_helper.name} (ID: {db_helper.id})")
     
     return helper_to_response(db_helper)
 
@@ -87,24 +95,41 @@ async def register_helper(
 @router.post("/login")
 async def login_helper(
     phone: str,
+    password: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
-    Simple login for helpers using phone number
-    Returns helper profile if found
+    Login for helpers using phone number + optional password
+    Returns JWT token for authenticated access
     """
     helper = db.query(Helper).filter(Helper.phone == phone).first()
     
     if not helper:
         raise HTTPException(status_code=404, detail="Helper not found. Please register first.")
     
+    # Verify password if helper has one set
+    if helper.password_hash and password:
+        if not verify_password(password, helper.password_hash):
+            raise HTTPException(status_code=401, detail="Invalid password")
+    
     # Update last active time
-    helper.last_active = datetime.utcnow()
+    helper.last_active = datetime.now(timezone.utc)
     db.commit()
     db.refresh(helper)
     
+    # Create JWT token
+    token = create_access_token({
+        "sub": str(helper.id),
+        "name": helper.name,
+        "role": helper.role or "helper"
+    })
+    
+    logger.info(f"Helper logged in: {helper.name} (ID: {helper.id})")
+    
     return {
         "success": True,
+        "access_token": token,
+        "token_type": "bearer",
         "helper": {
             "id": helper.id,
             "name": helper.name,
@@ -112,7 +137,8 @@ async def login_helper(
             "organization": helper.organization,
             "can_help_with": helper.can_help_with,
             "requests_completed": helper.requests_completed,
-            "is_active": helper.is_active
+            "is_active": helper.is_active,
+            "role": helper.role or "helper"
         }
     }
 

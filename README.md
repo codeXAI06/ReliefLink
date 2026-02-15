@@ -1,11 +1,26 @@
-# 🆘 ReliefLink - Disaster Help Matching Platform
+# 🆘 ReliefLink — AI-Powered Disaster Relief Coordination Platform
 
-A simple, reliable web application that connects people in need during disasters with nearby volunteers/helpers in real-time. Features **AI-powered multilingual voice input** for accessibility.
+An intelligent, real-time disaster help matching platform that connects people in crisis with nearby volunteers using **AI-driven triage**, **predictive hazard analytics**, **multilingual voice input**, and **emotional distress detection**.
 
-![ReliefLink](https://img.shields.io/badge/Status-MVP%20Ready-green)
+![ReliefLink](https://img.shields.io/badge/Status-Production%20Ready-green)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Python](https://img.shields.io/badge/Python-3.8+-blue)
 ![Node](https://img.shields.io/badge/Node.js-18+-green)
+
+---
+
+## 🏆 Patent-Worthy Innovations
+
+| # | Innovation | Description |
+|---|-----------|-------------|
+| 1 | **Multi-Factor AI Triage** | Combines urgency scoring, NLP distress analysis, and request velocity to auto-prioritize help requests |
+| 2 | **Predictive Hazard Zone Detection** | Time-series analysis of request patterns to predict where disaster impact will expand next |
+| 3 | **Emotional Distress NLP** | Real-time detection of panic, crying, desperation markers in text to boost priority |
+| 4 | **Voice-to-Help Pipeline** | End-to-end multilingual voice → transcription → NLP extraction → structured help request in 10+ languages |
+| 5 | **Auto-Escalation Engine** | Background system that escalates unanswered requests based on time and severity |
+| 6 | **Offline-First Disaster Reporting** | IndexedDB-backed request queue with background sync when connectivity returns |
+
+---
 
 ## 🎯 Overview
 
@@ -25,6 +40,25 @@ ReliefLink is designed for **emergency situations** where:
 ---
 
 ## 🆕 New Features (v2.0)
+
+### 🧠 AI & Machine Learning
+- **Multi-factor priority scoring** (urgency + AI + distress + time decay)
+- **Emotional distress NLP** — detects panic, crying, fear, desperation, physical distress
+- **Smart categorization** — auto-detects help type from description
+- **Duplicate detection** — prevents redundant requests
+- **Helper-request matching** — skill, distance, and availability scoring
+- **AI Explainability Panel** — "Why this priority?" with decision trail
+
+### 🗺️ Maps & Predictive Analytics
+- **Hazard zone detection** — clusters requests into disaster zones
+- **Predictive zone AI** — time-series velocity analysis predicts expanding disaster areas
+- **Route navigation** + Google Maps integration
+
+### 📡 Real-Time Features
+- **Server-Sent Events (SSE)** — live feed updates without polling
+- **Browser notifications** — alerts for new nearby requests
+- **Auto-escalation** — escalates unanswered requests every 2 minutes
+- **LIVE indicator** with connection status
 
 ### 🎤 Multilingual Voice-Based Help Requests
 - **Voice Input**: Speak your emergency in any supported language
@@ -52,6 +86,29 @@ ReliefLink is designed for **emergency situations** where:
 - **Full Phone Display**: Helpers can see complete phone numbers
 - **Quick Call Button**: One-tap calling to seekers
 - **Privacy**: Phone numbers are masked for non-authenticated users
+
+### 🔐 Security & Auth
+- **JWT authentication** with Bearer tokens
+- **Password hashing** (bcrypt)
+- **Role-based access** (helper, admin)
+- **Rate limiting** via slowapi
+
+### 📊 Admin Dashboard
+- **Analytics** — daily request charts, category breakdown, response times
+- **Helper leaderboard** — top responders ranked by completed requests
+- **Flagged request review** — approve/reject AI-flagged content
+- **CSV data export** for disaster coordination teams
+
+### 📱 PWA & Offline Support
+- **Progressive Web App** — installable on mobile
+- **Service Worker** — cache-first for static assets
+- **Offline queue** — IndexedDB-backed request queue with background sync
+- **Dark mode** — system preference detection + manual toggle
+
+### 📸 Photo Evidence
+- **Image upload** — up to 3 photos per request
+- **Auto-resize** — Pillow resizes to 1024px max for bandwidth savings
+- **Gallery view** — thumbnails in feed, full view in detail page
 
 ---
 
@@ -386,7 +443,38 @@ npx vercel --prod
 
 ---
 
-## 🤝 Contributing
+## � Demo Script
+
+1. **Open app** → Show PWA install prompt on mobile
+2. **Voice request** → Speak "My family is trapped, we need rescue, children are crying"
+3. **Watch AI** → Priority auto-set to Critical, distress score highlighted
+4. **Upload photo** → Add evidence image to the request
+5. **Map view** → Show hazard zones + AI predicted zones with risk scores
+6. **Live Feed** → Show LIVE indicator, new request appears via SSE
+7. **Login as helper** → Accept request, see route navigation
+8. **Admin Dashboard** → Analytics charts, leaderboard, CSV export
+9. **Dark mode** → Toggle dark mode via header button
+10. **AI Explainability** → Open request detail, expand "Why This Priority?" panel
+
+---
+
+## 📦 Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| **Frontend** | React 18, Vite, Tailwind CSS, Leaflet.js |
+| **Backend** | FastAPI, SQLAlchemy 2.0, Pydantic v2 |
+| **Auth** | JWT (python-jose), bcrypt |
+| **Real-Time** | Server-Sent Events (SSE) |
+| **AI/ML** | Custom NLP, priority scoring, distress analysis |
+| **Voice** | MediaRecorder API, Google Speech Recognition, Pydub |
+| **PWA** | Service Worker, IndexedDB, Web Manifest |
+| **Image** | Pillow (resize + optimize) |
+| **Database** | SQLite with composite indexes |
+
+---
+
+## �🤝 Contributing
 
 1. Fork the repository
 2. Create feature branch (`git checkout -b feature/amazing-feature`)

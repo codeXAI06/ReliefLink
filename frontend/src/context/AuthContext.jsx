@@ -12,8 +12,9 @@ export function AuthProvider({ children }) {
     // Check for existing session
     const helperId = localStorage.getItem('helperId');
     const helperData = localStorage.getItem('helperData');
+    const token = localStorage.getItem('authToken');
     
-    if (helperId && helperData) {
+    if (helperId && helperData && token) {
       try {
         const data = JSON.parse(helperData);
         setUser(data);
@@ -21,6 +22,7 @@ export function AuthProvider({ children }) {
       } catch (e) {
         localStorage.removeItem('helperId');
         localStorage.removeItem('helperData');
+        localStorage.removeItem('authToken');
       }
     }
     setLoading(false);
@@ -30,6 +32,10 @@ export function AuthProvider({ children }) {
     try {
       const response = await loginHelper(phone);
       if (response && response.success && response.helper) {
+        // Store JWT token
+        if (response.access_token) {
+          localStorage.setItem('authToken', response.access_token);
+        }
         localStorage.setItem('helperId', response.helper.id.toString());
         localStorage.setItem('helperData', JSON.stringify(response.helper));
         setUser(response.helper);
@@ -68,6 +74,7 @@ export function AuthProvider({ children }) {
   const logout = () => {
     localStorage.removeItem('helperId');
     localStorage.removeItem('helperData');
+    localStorage.removeItem('authToken');
     setUser(null);
     setHelper(null);
   };
@@ -95,7 +102,8 @@ export function AuthProvider({ children }) {
       register, 
       logout,
       refreshUser,
-      isAuthenticated: !!user 
+      isAuthenticated: !!user,
+      isAdmin: user?.role === 'admin'
     }}>
       {children}
     </AuthContext.Provider>

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createRequest, processVoiceInput, extractFromText } from '../api';
+import { createRequest, processVoiceInput, extractFromText, uploadImages } from '../api';
 import { useLanguage } from '../i18n/LanguageContext';
 import AudioRecorder from '../components/AudioRecorder';
 import AIAssistedForm from '../components/AIAssistedForm';
+import ImageUploader from '../components/ImageUploader';
 
 const HELP_TYPES = [
   { value: 'food', key: 'food', icon: '🍚' },
@@ -34,6 +35,7 @@ function RequestHelp() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [selectedImages, setSelectedImages] = useState([]);
   const [gettingLocation, setGettingLocation] = useState(false);
   
   // Voice processing state
@@ -225,7 +227,17 @@ function RequestHelp() {
     setLoading(true);
 
     try {
-      await createRequest(submitData);
+      const newRequest = await createRequest(submitData);
+      
+      // Upload images if any were selected
+      if (selectedImages.length > 0 && newRequest?.id) {
+        try {
+          await uploadImages(newRequest.id, selectedImages);
+        } catch (imgErr) {
+          console.error('Image upload failed:', imgErr);
+        }
+      }
+      
       setSuccess(true);
       setTimeout(() => navigate('/feed'), 2000);
     } catch (err) {
@@ -576,6 +588,14 @@ function RequestHelp() {
               />
               <p className="text-xs text-gray-500">🔒 {t('phonePrivacyNote')}</p>
             </div>
+          </div>
+
+          {/* Photo Evidence */}
+          <div className="bg-gray-50 rounded-xl p-4">
+            <ImageUploader 
+              images={selectedImages} 
+              onImagesChange={setSelectedImages} 
+            />
           </div>
 
           {/* Submit Button */}

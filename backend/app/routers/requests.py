@@ -2,11 +2,16 @@
 Help Requests API Router
 Handles all CRUD operations for disaster help requests
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+import os
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from typing import Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from PIL import Image
+import io
 
 from ..database import get_db
 from ..models import HelpRequest, Helper, StatusLog, AILog
@@ -16,8 +21,13 @@ from ..schemas import (
 )
 from ..utils import mask_phone, format_time_ago, calculate_priority_score, haversine_distance
 from ..services.ai_service import process_request_with_ai
+from ..events import event_bus
+from ..logging_config import get_logger
 
+logger = get_logger("requests")
 router = APIRouter(prefix="/requests", tags=["Help Requests"])
+
+UPLOADS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "uploads")
 
 
 def request_to_response(request: HelpRequest, include_phone: bool = False) -> HelpRequestResponse:
@@ -67,6 +77,20 @@ def request_to_response(request: HelpRequest, include_phone: bool = False) -> He
     if hasattr(request, 'duplicate_of_id') and request.duplicate_of_id:
         response.duplicate_of_id = request.duplicate_of_id
         response.duplicate_similarity = request.duplicate_similarity
+    
+    # Image evidence
+    if hasattr(request, 'image_urls') and request.image_urls:
+        response.image_urls = request.image_urls
+    
+    # Distress analysis
+    if hasattr(request, 'distress_score') and request.distress_score is not None:
+        response.distress_score = request.distress_score
+        response.distress_indicators = request.distress_indicators
+    
+    # Escalation
+    if hasattr(request, 'escalation_level') and request.escalation_level:
+        response.escalation_level = request.escalation_level
+        response.escalated_at = request.escalated_at
     
     return response
 
@@ -192,6 +216,48 @@ async def create_request(
             db_request.flag_reason = ', '.join(ai_flag.get('reasons', []))
             db_request.review_status = 'pending_review'
     
+    # ------- Hyderabad Hazard Zone geo-fence check -------
+    HYDERABAD_LAT, HYDERABAD_LON, HAZARD_RADIUS_KM = 17.385, 78.4867, 25.0
+    dist_from_center = haversine_distance(
+        request_data.latitude, request_data.longitude,
+        HYDERABAD_LAT, HYDERABAD_LON
+    )
+    if dist_from_center > HAZARD_RADIUS_KM:
+        db_request.is_flagged = True
+        existing_reason = db_request.flag_reason or ''
+        zone_reason = f"Request location is {dist_from_center:.1f} km from Hyderabad center (outside {HAZARD_RADIUS_KM} km hazard zone)"
+        db_request.flag_reason = f"{existing_reason}, {zone_reason}" if existing_reason else zone_reason
+        db_request.review_status = 'pending_review'
+    
+    # ------- Enhanced repeat / duplicate detection -------
+    # Flag if same phone submitted 2+ requests in 6 hours
+    if request_data.phone and recent_from_phone >= 2:
+        db_request.is_flagged = True
+        existing_reason = db_request.flag_reason or ''
+        repeat_reason = f"Same phone number submitted {recent_from_phone} requests in 24h"
+        db_request.flag_reason = f"{existing_reason}, {repeat_reason}" if existing_reason else repeat_reason
+        db_request.review_status = 'pending_review'
+    
+    # Flag if very close location + same help type within last 6 hours
+    close_same_type = db.query(HelpRequest).filter(
+        func.abs(HelpRequest.latitude - request_data.latitude) < 0.005,
+        func.abs(HelpRequest.longitude - request_data.longitude) < 0.005,
+        HelpRequest.help_type == request_data.help_type.value,
+        HelpRequest.status.notin_(['completed', 'cancelled']),
+        HelpRequest.created_at >= datetime.utcnow() - timedelta(hours=6)
+    ).count()
+    if close_same_type > 0:
+        db_request.is_flagged = True
+        existing_reason = db_request.flag_reason or ''
+        dup_reason = f"Similar request ({request_data.help_type.value}) already exists within 500m in last 6h"
+        db_request.flag_reason = f"{existing_reason}, {dup_reason}" if existing_reason else dup_reason
+        db_request.review_status = 'pending_review'
+    
+    # Apply distress analysis
+    if ai_result.get('distress'):
+        db_request.distress_score = ai_result['distress'].get('distress_score', 0)
+        db_request.distress_indicators = ai_result['distress'].get('indicators', [])
+    
     db.add(db_request)
     db.commit()
     db.refresh(db_request)
@@ -222,6 +288,24 @@ async def create_request(
     db.add(status_log)
     db.commit()
     
+    # Emit SSE event for new request
+    import asyncio
+    asyncio.create_task(event_bus.publish("new_request", {
+        "id": db_request.id,
+        "help_type": db_request.help_type,
+        "urgency": db_request.urgency,
+        "priority_score": db_request.priority_score,
+        "latitude": db_request.latitude,
+        "longitude": db_request.longitude,
+        "address": db_request.address,
+        "status": db_request.status,
+        "ai_priority_label": db_request.ai_priority_label,
+        "escalation_level": db_request.escalation_level or 0,
+        "created_at": str(db_request.created_at)
+    }))
+    
+    logger.info(f"New request #{db_request.id} created (priority: {db_request.ai_priority_label})")
+    
     return request_to_response(db_request)
 
 
@@ -232,7 +316,7 @@ async def get_requests(
     status: Optional[str] = None,
     urgency: Optional[str] = None,
     help_type: Optional[str] = None,
-    sort_by: str = Query("priority", regex="^(priority|time|urgency)$"),
+    sort_by: str = Query("priority", pattern="^(priority|time|urgency)$"),
     lat: Optional[float] = None,
     lon: Optional[float] = None,
     db: Session = Depends(get_db)
@@ -556,4 +640,130 @@ async def complete_request(
     db.commit()
     db.refresh(request)
     
+    # Emit SSE event
+    import asyncio
+    asyncio.create_task(event_bus.publish("request_completed", {
+        "id": request.id,
+        "helper_id": helper_id,
+        "status": "completed"
+    }))
+    
     return request_to_response(request)
+
+
+# ============ SSE Real-Time Stream ============
+
+@router.get("/stream/events")
+async def stream_events():
+    """
+    Server-Sent Events endpoint for real-time updates.
+    Clients connect and receive events when requests are created, 
+    accepted, completed, or escalated.
+    """
+    async def generate():
+        yield "event: connected\ndata: {\"status\": \"connected\"}\n\n"
+        async for event in event_bus.subscribe():
+            yield event
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+# ============ Image Upload ============
+
+@router.post("/{request_id}/images")
+async def upload_images(
+    request_id: int,
+    files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload damage evidence photos for a help request.
+    Accepts up to 3 images (JPEG/PNG/WebP), resizes to max 1024px.
+    """
+    request = db.query(HelpRequest).filter(HelpRequest.id == request_id).first()
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+    
+    if len(files) > 3:
+        raise HTTPException(status_code=400, detail="Maximum 3 images allowed")
+    
+    ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
+    MAX_SIZE = 5 * 1024 * 1024  # 5MB
+    
+    saved_urls = request.image_urls or []
+    
+    for file in files:
+        if file.content_type not in ALLOWED_TYPES:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid file type: {file.content_type}. Allowed: JPEG, PNG, WebP"
+            )
+        
+        contents = await file.read()
+        if len(contents) > MAX_SIZE:
+            raise HTTPException(status_code=400, detail="File too large (max 5MB)")
+        
+        # Resize with Pillow
+        img = Image.open(io.BytesIO(contents))
+        img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+        
+        # Save
+        filename = f"{request_id}_{uuid.uuid4().hex[:8]}.jpg"
+        filepath = os.path.join(UPLOADS_DIR, filename)
+        os.makedirs(UPLOADS_DIR, exist_ok=True)
+        img.save(filepath, "JPEG", quality=85)
+        
+        saved_urls.append(f"/uploads/{filename}")
+        logger.info(f"Image uploaded for request #{request_id}: {filename}")
+    
+    request.image_urls = saved_urls
+    db.commit()
+    db.refresh(request)
+    
+    return {
+        "success": True,
+        "image_urls": saved_urls,
+        "count": len(saved_urls)
+    }
+
+
+# ============ Admin Endpoints ============
+
+@router.get("/admin/flagged")
+async def get_flagged_requests(db: Session = Depends(get_db)):
+    """Get all flagged/pending review requests for admin"""
+    flagged = db.query(HelpRequest).filter(
+        HelpRequest.is_flagged == True
+    ).order_by(desc(HelpRequest.created_at)).all()
+    return [request_to_response(r) for r in flagged]
+
+
+@router.post("/{request_id}/review")
+async def review_request(
+    request_id: int,
+    action: str = Query(..., pattern="^(approve|reject)$"),
+    db: Session = Depends(get_db)
+):
+    """Admin reviews a flagged request"""
+    request = db.query(HelpRequest).filter(HelpRequest.id == request_id).first()
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+    
+    if action == "approve":
+        request.review_status = "approved"
+        request.is_flagged = False
+    elif action == "reject":
+        request.review_status = "rejected"
+        request.status = "cancelled"
+    
+    db.commit()
+    logger.info(f"Request #{request_id} {action}d by admin")
+    return {"success": True, "action": action}

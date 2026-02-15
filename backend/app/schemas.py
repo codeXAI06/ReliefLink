@@ -90,6 +90,17 @@ class HelpRequestResponse(BaseModel):
     duplicate_similarity: Optional[float] = None  # Similarity score
     is_flagged: Optional[bool] = None  # Whether request is flagged
     flag_reason: Optional[str] = None  # Why it was flagged
+    
+    # Image evidence
+    image_urls: Optional[List[str]] = None
+    
+    # Distress analysis
+    distress_score: Optional[float] = None
+    distress_indicators: Optional[List[str]] = None
+    
+    # Escalation
+    escalation_level: Optional[int] = None
+    escalated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -109,6 +120,7 @@ class HelperCreate(BaseModel):
     """Schema for registering a helper"""
     name: str = Field(..., min_length=2, max_length=100)
     phone: Optional[str] = None
+    password: Optional[str] = None  # Optional password for security
     organization: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None

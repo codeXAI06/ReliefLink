@@ -7,12 +7,16 @@ Schema Design:
 - status_logs: Track status changes with timestamps
 - ai_logs: Track AI decisions for transparency
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean, JSON
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean, JSON, Index
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 import enum
 
 from .database import Base
+
+
+def utcnow():
+    return datetime.now(timezone.utc)
 
 
 class HelpType(str, enum.Enum):
@@ -51,9 +55,9 @@ class HelpRequest(Base):
     id = Column(Integer, primary_key=True, index=True)
     
     # Request details
-    help_type = Column(String(20), nullable=False)
+    help_type = Column(String(20), nullable=False, index=True)
     description = Column(Text, nullable=True)
-    urgency = Column(String(20), default="moderate")
+    urgency = Column(String(20), default="moderate", index=True)
     
     # Location (GPS coordinates + manual address)
     latitude = Column(Float, nullable=False)
@@ -65,14 +69,25 @@ class HelpRequest(Base):
     contact_name = Column(String(100), nullable=True)
     
     # Status tracking
-    status = Column(String(20), default="requested")
-    helper_id = Column(Integer, ForeignKey("helpers.id"), nullable=True)
+    status = Column(String(20), default="requested", index=True)
+    helper_id = Column(Integer, ForeignKey("helpers.id"), nullable=True, index=True)
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow, index=True)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     accepted_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
+    
+    # === IMAGE EVIDENCE ===
+    image_urls = Column(JSON, nullable=True)  # List of uploaded image paths
+    
+    # === DISTRESS ANALYSIS ===
+    distress_score = Column(Float, nullable=True)  # 0-1 emotional urgency
+    distress_indicators = Column(JSON, nullable=True)  # Detected distress signals
+    
+    # === ESCALATION ===
+    escalation_level = Column(Integer, default=0)  # 0=normal, 1=elevated, 2=critical
+    escalated_at = Column(DateTime, nullable=True)
     
     # === AI PRIORITY SCORING ===
     # Base priority score (0-100, higher = more urgent)
@@ -119,6 +134,12 @@ class HelpRequest(Base):
     # Relationships
     helper = relationship("Helper", back_populates="accepted_requests")
     status_logs = relationship("StatusLog", back_populates="request")
+    
+    # Composite indexes for common queries
+    __table_args__ = (
+        Index('ix_requests_status_priority', 'status', 'ai_priority_score'),
+        Index('ix_requests_location', 'latitude', 'longitude'),
+    )
 
 
 class Helper(Base):
@@ -132,8 +153,10 @@ class Helper(Base):
     
     # Basic info
     name = Column(String(100), nullable=False)
-    phone = Column(String(20), nullable=True)
+    phone = Column(String(20), nullable=True, unique=True, index=True)
+    password_hash = Column(String(200), nullable=True)  # bcrypt hash
     organization = Column(String(200), nullable=True)  # NGO name if applicable
+    role = Column(String(20), default="helper")  # helper, admin
     
     # Current location (for distance-based matching)
     latitude = Column(Float, nullable=True)
@@ -151,8 +174,8 @@ class Helper(Base):
     rating = Column(Float, default=5.0)  # Average rating from requesters
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    last_active = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    last_active = Column(DateTime, default=utcnow)
     
     # Relationships
     accepted_requests = relationship("HelpRequest", back_populates="helper")
@@ -173,7 +196,7 @@ class StatusLog(Base):
     changed_by = Column(Integer, nullable=True)  # Helper ID if applicable
     notes = Column(Text, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     
     # Relationships
     request = relationship("HelpRequest", back_populates="status_logs")
@@ -205,4 +228,4 @@ class AILog(Base):
     # Processing time (for performance monitoring)
     processing_time_ms = Column(Integer, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)

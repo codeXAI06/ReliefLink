@@ -114,7 +114,7 @@ function Home() {
               </div>
             </div>
             <Link to="/helper" className="text-green-600 font-medium text-sm">
-              Dashboard →
+              {t('dashboard')} →
             </Link>
           </div>
         </div>

@@ -1,28 +1,36 @@
 """
 Database configuration for ReliefLink
-Using SQLite for MVP - simple, reliable, no setup required
+Using SQLite for MVP - PostgreSQL ready via DATABASE_URL env var
 """
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, DeclarativeBase
 import os
 
-# Database file path
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATABASE_URL = f"sqlite:///{os.path.join(BASE_DIR, '..', 'relieflink.db')}"
+from .config import get_settings
 
-# Create engine with SQLite optimizations
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},  # Required for SQLite
-    echo=False  # Set True for debugging SQL queries
-)
+
+settings = get_settings()
+
+# Resolve database path
+if settings.DATABASE_URL.startswith("sqlite"):
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    DATABASE_URL = f"sqlite:///{os.path.join(BASE_DIR, '..', 'relieflink.db')}"
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        echo=False
+    )
+else:
+    DATABASE_URL = settings.DATABASE_URL
+    engine = create_engine(DATABASE_URL, echo=False)
 
 # Session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Base class for models
-Base = declarative_base()
+
+# Modern declarative base (SQLAlchemy 2.0+)
+class Base(DeclarativeBase):
+    pass
 
 def get_db():
     """Dependency for getting database session"""

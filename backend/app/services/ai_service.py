@@ -734,6 +734,73 @@ def get_helper_recommendations(
 # MAIN AI PROCESSING FUNCTION
 # ============================================================
 
+# DISTRESS ANALYSIS KEYWORDS
+DISTRESS_INDICATORS = {
+    'panic': {'please help', 'someone help', 'anyone', 'god help', 'we are dying', 'please please', 'help help'},
+    'crying': {'crying', 'tears', 'sobbing', 'screaming', 'scream', 'yelling'},
+    'fear': {'scared', 'terrified', 'afraid', 'fear', 'panic', 'horror', 'darkness'},
+    'desperation': {'last hope', 'no one', 'nobody', 'abandoned', 'alone', 'stranded', 'hopeless', 'desperate'},
+    'physical_distress': {'pain', 'hurt', 'broken', 'bleeding', 'can\'t move', 'can\'t breathe', 'suffocating'},
+    'time_pressure': {'running out', 'won\'t last', 'hurry', 'quickly', 'fast', 'immediately', 'asap', 'right now'},
+}
+
+
+def analyze_distress(description: str) -> dict:
+    """
+    Analyze emotional distress level from text.
+    Returns distress score (0-1) and detected indicators.
+    
+    Patent claim: Emotional context analysis for disaster priority scoring.
+    """
+    text = (description or '').lower()
+    
+    detected = []
+    category_scores = {}
+    
+    for category, keywords in DISTRESS_INDICATORS.items():
+        found = [kw for kw in keywords if kw in text]
+        if found:
+            detected.extend([f"{category}: {kw}" for kw in found])
+            category_scores[category] = min(1.0, len(found) * 0.3)
+    
+    # Check for repetition (e.g., "help help help")
+    words = text.split()
+    if len(words) > 2:
+        repeated = sum(1 for i in range(len(words)-1) if words[i] == words[i+1])
+        if repeated > 0:
+            detected.append(f"word_repetition: {repeated} repeated words")
+            category_scores['repetition'] = min(1.0, repeated * 0.25)
+    
+    # Check for ALL CAPS
+    if description and len(description) > 10:
+        caps_ratio = sum(1 for c in description if c.isupper()) / len(description)
+        if caps_ratio > 0.5:
+            detected.append(f"caps_intensity: {caps_ratio:.0%} uppercase")
+            category_scores['caps'] = caps_ratio * 0.5
+    
+    # Check for excessive punctuation (!!!, ???)
+    exclamation_count = description.count('!') if description else 0
+    question_count = description.count('?') if description else 0
+    if exclamation_count > 2:
+        detected.append(f"exclamation_intensity: {exclamation_count} marks")
+        category_scores['punctuation'] = min(1.0, exclamation_count * 0.1)
+    
+    # Aggregate score
+    if category_scores:
+        score = min(1.0, sum(category_scores.values()) / max(len(category_scores), 1))
+        # Weight by number of categories detected
+        score = min(1.0, score * (1 + len(category_scores) * 0.1))
+    else:
+        score = 0.0
+    
+    return {
+        'distress_score': round(score, 3),
+        'indicators': detected[:10],  # Top 10 indicators
+        'categories_detected': list(category_scores.keys()),
+        'severity': 'critical' if score > 0.7 else 'high' if score > 0.4 else 'moderate' if score > 0.15 else 'low'
+    }
+
+
 def process_request_with_ai(
     request_data: Dict,
     existing_requests: List[Dict] = None,
@@ -756,6 +823,7 @@ def process_request_with_ai(
         'translation': None,
         'duplicate': None,
         'flag': None,
+        'distress': None,
         'errors': []
     }
     
@@ -841,6 +909,18 @@ def process_request_with_ai(
         }
     except Exception as e:
         results['errors'].append(f"Spam check failed: {str(e)}")
+    
+    # 6. Distress analysis
+    try:
+        distress_result = analyze_distress(description)
+        results['distress'] = distress_result
+        # Boost priority if high distress detected
+        if distress_result['distress_score'] > 0.5 and results.get('priority'):
+            boost = int(distress_result['distress_score'] * 15)
+            results['priority']['score'] = min(100, results['priority']['score'] + boost)
+            results['priority']['reasons'].append(f"High emotional distress detected: +{boost}")
+    except Exception as e:
+        results['errors'].append(f"Distress analysis failed: {str(e)}")
     
     # Calculate total processing time
     results['processing_time_ms'] = round((time.time() - start_time) * 1000, 2)

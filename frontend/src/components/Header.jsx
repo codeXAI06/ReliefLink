@@ -75,6 +75,7 @@ function Header() {
             label={isAuthenticated ? (t('dashboard') || 'Dashboard') : (t('login') || 'Login')} 
             active={isActive('/helper') || isActive('/login')} 
           />
+          <NavItem to="/admin" icon="📊" label={t('admin') || 'Admin'} active={isActive('/admin')} />
         </div>
       </nav>
     </>

@@ -11,6 +11,28 @@ const api = axios.create({
   },
 });
 
+// JWT Token Interceptor — attach token to every request
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('authToken');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Auto-logout on 401
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('helperId');
+      localStorage.removeItem('helperData');
+    }
+    return Promise.reject(error);
+  }
+);
+
 // ============ Help Requests API ============
 
 export const createRequest = async (requestData) => {
@@ -123,6 +145,25 @@ export const getStats = async () => {
 
 export const getSummary = async () => {
   const response = await api.get('/stats/summary');
+  return response.data;
+};
+
+export const getHazardZones = async (radiusKm = 5) => {
+  const response = await api.get('/stats/hazard-zones', {
+    params: { radius_km: radiusKm }
+  });
+  return response.data;
+};
+
+export const getPredictiveZones = async (hoursBack = 6) => {
+  const response = await api.get('/stats/predictive-zones', {
+    params: { hours_back: hoursBack }
+  });
+  return response.data;
+};
+
+export const getAnalytics = async () => {
+  const response = await api.get('/stats/analytics');
   return response.data;
 };
 
@@ -304,6 +345,65 @@ export const getHelpTypeIcon = (type) => {
     other: '📦'
   };
   return icons[type] || '📦';
+};
+
+// ============ Image Upload API ============
+
+export const uploadImages = async (requestId, files) => {
+  const formData = new FormData();
+  files.forEach(file => formData.append('files', file));
+  const response = await api.post(`/requests/${requestId}/images`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 30000,
+  });
+  return response.data;
+};
+
+// ============ SSE Real-Time Stream ============
+
+export const connectSSE = (onEvent) => {
+  const eventSource = new EventSource('/api/requests/stream/events');
+  
+  eventSource.addEventListener('new_request', (e) => {
+    onEvent('new_request', JSON.parse(e.data));
+  });
+  
+  eventSource.addEventListener('request_accepted', (e) => {
+    onEvent('request_accepted', JSON.parse(e.data));
+  });
+  
+  eventSource.addEventListener('request_completed', (e) => {
+    onEvent('request_completed', JSON.parse(e.data));
+  });
+  
+  eventSource.addEventListener('connected', () => {
+    console.log('SSE connected');
+  });
+  
+  eventSource.onerror = () => {
+    console.log('SSE reconnecting...');
+  };
+  
+  return eventSource;
+};
+
+// ============ Admin API ============
+
+export const getFlaggedRequests = async () => {
+  const response = await api.get('/requests/admin/flagged');
+  return response.data;
+};
+
+export const reviewRequest = async (requestId, action) => {
+  const response = await api.post(`/requests/${requestId}/review`, null, {
+    params: { action }
+  });
+  return response.data;
+};
+
+export const exportStats = async () => {
+  const response = await api.get('/stats/export', { responseType: 'blob' });
+  return response.data;
 };
 
 export default api;

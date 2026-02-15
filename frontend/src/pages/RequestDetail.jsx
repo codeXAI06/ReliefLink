@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { getRequest, getRequestHistory, acceptRequest, completeRequest, getHelpTypeIcon } from '../api';
+import { getRequest, getRequestHistory, acceptRequest, completeRequest, getHelpTypeIcon, getAILogs } from '../api';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { useLanguage } from '../i18n/LanguageContext';
 import { AIInsightsCard, DuplicateWarning, FlagWarning, AIPriorityBadge } from '../components/AIBadges';
@@ -11,6 +11,8 @@ function RequestDetail() {
   const { t } = useLanguage();
   const [request, setRequest] = useState(null);
   const [history, setHistory] = useState([]);
+  const [aiLogs, setAILogs] = useState([]);
+  const [showAIExplain, setShowAIExplain] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
@@ -30,9 +32,14 @@ function RequestDetail() {
       ]);
       setRequest(requestData);
       setHistory(historyData);
+      // Load AI logs for explainability
+      try {
+        const logs = await getAILogs(id);
+        setAILogs(logs);
+      } catch (_) { /* AI logs optional */ }
     } catch (err) {
       console.error('Error loading request:', err);
-      setError('Request not found');
+      setError(t('requestNotFound'));
     } finally {
       setLoading(false);
     }
@@ -49,7 +56,7 @@ function RequestDetail() {
       await acceptRequest(id, parseInt(helperId));
       loadRequest();
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to accept');
+      setError(err.response?.data?.detail || t('errorAccepting'));
     } finally {
       setActionLoading(false);
     }
@@ -63,7 +70,7 @@ function RequestDetail() {
       await completeRequest(id, parseInt(helperId));
       loadRequest();
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to complete');
+      setError(err.response?.data?.detail || t('errorCompleting'));
     } finally {
       setActionLoading(false);
     }
@@ -137,10 +144,10 @@ function RequestDetail() {
           <div className="flex space-x-2 mt-3">
             <span className={`px-3 py-1 rounded-full text-sm font-medium capitalize border ${urgencyColors[request.urgency]}`}>
               {request.urgency === 'critical' && '🔴 '}
-              {request.urgency}
+              {t(request.urgency) || request.urgency}
             </span>
             <span className={`px-3 py-1 rounded-full text-sm font-medium capitalize ${statusColors[request.status]}`}>
-              {request.status.replace('_', ' ')}
+              {t(request.status) || request.status.replace('_', ' ')}
             </span>
           </div>
         </div>
@@ -161,6 +168,135 @@ function RequestDetail() {
           
           {/* AI Insights Card */}
           <AIInsightsCard request={request} />
+          
+          {/* Distress Analysis */}
+          {request.distress_score > 0 && (
+            <div className={`rounded-lg p-3 border ${
+              request.distress_score > 0.7 ? 'bg-red-50 border-red-200' :
+              request.distress_score > 0.4 ? 'bg-orange-50 border-orange-200' :
+              'bg-yellow-50 border-yellow-200'
+            }`}>
+              <h3 className="text-sm font-semibold mb-2">
+                🧠 {t('emotionalDistressAnalysis')}
+              </h3>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="flex-1 bg-gray-200 rounded-full h-2.5">
+                  <div 
+                    className={`h-2.5 rounded-full ${
+                      request.distress_score > 0.7 ? 'bg-red-500' :
+                      request.distress_score > 0.4 ? 'bg-orange-500' : 'bg-yellow-500'
+                    }`}
+                    style={{ width: `${request.distress_score * 100}%` }}
+                  ></div>
+                </div>
+                <span className="text-sm font-bold">
+                  {(request.distress_score * 100).toFixed(0)}%
+                </span>
+              </div>
+              {request.distress_indicators && Object.keys(request.distress_indicators).length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {Object.entries(request.distress_indicators).map(([key, score]) => (
+                    <span key={key} className="text-xs bg-white/80 rounded px-2 py-0.5 capitalize">
+                      {key.replace('_', ' ')}: {(score * 100).toFixed(0)}%
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* AI Explainability Panel */}
+          <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-100">
+            <button
+              onClick={() => setShowAIExplain(!showAIExplain)}
+              className="w-full p-3 flex items-center justify-between text-left"
+            >
+              <span className="text-sm font-semibold text-indigo-800">
+                🤖 {t('whyThisPriority')}
+              </span>
+              <span className="text-indigo-400">{showAIExplain ? '▲' : '▼'}</span>
+            </button>
+            {showAIExplain && (
+              <div className="px-3 pb-3 space-y-2">
+                {/* Priority breakdown */}
+                <div className="bg-white rounded-lg p-3 text-sm space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">{t('baseUrgencyScore')}</span>
+                    <span className="font-mono font-bold">
+                      {request.urgency === 'critical' ? '80' : request.urgency === 'moderate' ? '50' : '20'}/100
+                    </span>
+                  </div>
+                  {request.ai_priority_score != null && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">{t('aiPriorityScore')}</span>
+                      <span className="font-mono font-bold">{request.ai_priority_score}/100</span>
+                    </div>
+                  )}
+                  {request.distress_score > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">{t('distressBoost')}</span>
+                      <span className="font-mono font-bold text-red-600">
+                        +{(request.distress_score * 15).toFixed(0)} pts
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between border-t pt-2">
+                    <span className="font-semibold text-gray-800">{t('finalPriority')}</span>
+                    <span className="font-mono font-bold text-lg">{request.priority_score}/100</span>
+                  </div>
+                  {request.ai_priority_reason && (
+                    <p className="text-xs text-gray-500 italic mt-1">
+                      {t('aiReason')}: "{request.ai_priority_reason}"
+                    </p>
+                  )}
+                </div>
+
+                {/* AI Decision Log */}
+                {aiLogs.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-indigo-700 mb-1">{t('aiDecisionTrail')}:</p>
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                      {aiLogs.map((log, idx) => (
+                        <div key={idx} className="bg-white rounded p-2 text-xs">
+                          <div className="flex justify-between">
+                            <span className="font-medium capitalize">{log.action}</span>
+                            <span className="text-gray-400">
+                              {new Date(log.created_at).toLocaleTimeString()}
+                            </span>
+                          </div>
+                          {log.result && (
+                            <p className="text-gray-600 mt-0.5 truncate">{JSON.stringify(log.result)}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <p className="text-xs text-indigo-400 italic">
+                  Patent: Multi-factor AI triage with emotional distress NLP
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Image Gallery */}
+          {request.image_urls && request.image_urls.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-500 mb-2">📸 {t('photoEvidence')}</h3>
+              <div className="grid grid-cols-3 gap-2">
+                {request.image_urls.map((url, idx) => (
+                  <img 
+                    key={idx}
+                    src={url} 
+                    alt={`Evidence ${idx + 1}`}
+                    className="w-full h-24 object-cover rounded-lg border cursor-pointer hover:opacity-80"
+                    onClick={() => window.open(url, '_blank')}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
           
           {/* Description */}
           {request.description && (
@@ -278,7 +414,7 @@ function RequestDetail() {
                 }`}></div>
                 <div className="flex-1">
                   <p className="font-medium text-gray-900 capitalize">
-                    {log.new_status.replace('_', ' ')}
+                    {t(log.new_status) || log.new_status.replace('_', ' ')}
                   </p>
                   {log.notes && <p className="text-sm text-gray-600">{log.notes}</p>}
                   <p className="text-xs text-gray-400 mt-1">
@@ -293,10 +429,10 @@ function RequestDetail() {
 
       {/* Timestamps */}
       <div className="mt-6 text-sm text-gray-500 space-y-1">
-        <p>Created: {new Date(request.created_at).toLocaleString()}</p>
-        <p>Last updated: {new Date(request.updated_at).toLocaleString()}</p>
+        <p>{t('created')}: {new Date(request.created_at).toLocaleString()}</p>
+        <p>{t('lastUpdated')}: {new Date(request.updated_at).toLocaleString()}</p>
         {request.completed_at && (
-          <p>Completed: {new Date(request.completed_at).toLocaleString()}</p>
+          <p>{t('completed')}: {new Date(request.completed_at).toLocaleString()}</p>
         )}
       </div>
     </div>

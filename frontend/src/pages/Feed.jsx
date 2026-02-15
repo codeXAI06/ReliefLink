@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { getRequests } from '../api';
+import { useState, useEffect, useCallback } from 'react';
+import { getRequests, connectSSE } from '../api';
 import { useLanguage } from '../i18n/LanguageContext';
 import RequestCard from '../components/RequestCard';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -9,6 +9,7 @@ function Feed() {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [liveCount, setLiveCount] = useState(0);
   const [filters, setFilters] = useState({
     status: '',
     urgency: '',
@@ -19,6 +20,34 @@ function Feed() {
   useEffect(() => {
     loadRequests();
   }, [filters]);
+
+  // SSE real-time updates
+  useEffect(() => {
+    const eventSource = connectSSE((eventType, data) => {
+      if (eventType === 'new_request') {
+        setLiveCount(prev => prev + 1);
+        // Show browser notification if permitted
+        if (Notification.permission === 'granted') {
+          new Notification('New Help Request', {
+            body: `${data.help_type?.toUpperCase()} - ${data.urgency} priority`,
+            icon: '/favicon.ico',
+            tag: `request-${data.id}`,
+          });
+        }
+        // Auto-refresh
+        loadRequests();
+      } else if (eventType === 'request_completed' || eventType === 'request_accepted') {
+        loadRequests();
+      }
+    });
+
+    // Request notification permission
+    if (Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+
+    return () => eventSource.close();
+  }, []);
 
   const loadRequests = async () => {
     setLoading(true);
@@ -50,8 +79,12 @@ function Feed() {
         <h1 className="text-2xl font-bold text-gray-900 flex items-center">
           <span className="mr-2">📋</span> {t('helpRequests')}
         </h1>
-        <p className="text-gray-600 text-sm mt-1">
+        <p className="text-gray-600 text-sm mt-1 flex items-center gap-2">
           {requests.length} {t('activeRequests')}
+          <span className="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+            {t('live') || 'LIVE'}
+          </span>
         </p>
       </div>
 
